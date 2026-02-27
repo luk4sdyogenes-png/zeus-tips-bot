@@ -1,18 +1,20 @@
-
 import requests
 import os
 import json
+import logging
 from datetime import datetime
 from openai import OpenAI
 import mercadopago
 
-# Carregar variáveis de ambiente
+# Carregar variáveis de ambiente apenas se não estiverem já definidas (para Railway)
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=False)  # override=False evita sobrescrever variáveis já definidas
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MERCADOPAGO_ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
+
+logger = logging.getLogger(__name__)
 
 # --- API-Football Integration ---
 
@@ -47,10 +49,14 @@ def get_h2h_statistics(team_a_id: int, team_b_id: int):
 
 def analyze_and_predict(match_data: dict):
     if not OPENAI_API_KEY:
-        print("OPENAI_API_KEY não configurada.")
+        logger.error("OPENAI_API_KEY não configurada. Verifique as variáveis de ambiente.")
         return None
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+    except Exception as e:
+        logger.error(f"Erro ao inicializar cliente OpenAI: {e}")
+        return None
 
     prompt = f"""
     Analise os seguintes dados de futebol para gerar um palpite esportivo. Considere as estatísticas dos times, forma recente, confrontos diretos e o fator mandante/visitante. O palpite deve incluir um nível de confiança (%), o melhor mercado (ex: resultado final, ambas marcam, over/under) e odds sugeridas.
@@ -85,21 +91,26 @@ def analyze_and_predict(match_data: dict):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Erro ao chamar a API da OpenAI: {e}")
+        logger.error(f"Erro ao chamar a API da OpenAI: {e}")
         return None
 
 # --- Mercado Pago Integration ---
 
 def get_mercadopago_sdk():
     if not MERCADOPAGO_ACCESS_TOKEN:
-        print("MERCADOPAGO_ACCESS_TOKEN não configurada.")
+        logger.error("MERCADOPAGO_ACCESS_TOKEN não configurada. Verifique as variáveis de ambiente.")
         return None
     sdk = mercadopago.SDK(MERCADOPAGO_ACCESS_TOKEN)
     return sdk
 
 def create_payment(plan_details: dict, user_id: int):
+    """
+    Cria um pagamento via Mercado Pago usando a SDK atualizada.
+    A SDK atual requer sdk.payment().create() com parênteses em payment().
+    """
     sdk = get_mercadopago_sdk()
     if not sdk:
+        logger.error("Erro ao obter SDK do Mercado Pago")
         return None
 
     title = plan_details.get("title", "Assinatura Zeus Tips")
@@ -118,31 +129,51 @@ def create_payment(plan_details: dict, user_id: int):
     }
 
     try:
-        preference_response = sdk.payment.create(payment_data)
+        # SDK atualizada: sdk.payment().create() com parênteses em payment()
+        preference_response = sdk.payment().create(payment_data)
         payment = preference_response["response"]
+        
         if payment and payment.get("point_of_interaction") and payment["point_of_interaction"].get("transaction_data"):
             qr_code_base64 = payment["point_of_interaction"]["transaction_data"]["qr_code_base64"]
             qr_code_text = payment["point_of_interaction"]["transaction_data"]["qr_code"]
             payment_id = payment["id"]
+            logger.info(f"Pagamento criado com sucesso. ID: {payment_id}")
             return {"qr_code_base64": qr_code_base64, "qr_code_text": qr_code_text, "payment_id": payment_id}
         else:
-            print(f"Erro ao criar pagamento: {payment.get('message', 'Resposta inesperada do Mercado Pago')}")
+            error_msg = payment.get('message', 'Resposta inesperada do Mercado Pago')
+            logger.error(f"Erro ao criar pagamento: {error_msg}")
             return None
+    except AttributeError as e:
+        logger.error(f"Erro ao criar pagamento no Mercado Pago (AttributeError - verifique versão da SDK): {e}")
+        return None
     except Exception as e:
-        print(f"Erro ao criar pagamento no Mercado Pago: {e}")
+        logger.error(f"Erro ao criar pagamento no Mercado Pago: {e}")
         return None
 
 def check_payment_status(payment_id: str):
+    """
+    Verifica o status de um pagamento via Mercado Pago.
+    A SDK atual requer sdk.payment().get() com parênteses em payment().
+    """
     sdk = get_mercadopago_sdk()
     if not sdk:
+        logger.error("Erro ao obter SDK do Mercado Pago")
         return None
 
     try:
-        payment_info = sdk.payment.get(payment_id)
+        # SDK atualizada: sdk.payment().get() com parênteses em payment()
+        payment_info = sdk.payment().get(payment_id)
+        
         if payment_info and payment_info["response"]:
             status = payment_info["response"]["status"]
+            logger.info(f"Status do pagamento {payment_id}: {status}")
             return status # Ex: "pending", "approved", "rejected"
+        
+        logger.warning(f"Resposta vazia ao verificar pagamento {payment_id}")
+        return None
+    except AttributeError as e:
+        logger.error(f"Erro ao verificar status do pagamento (AttributeError - verifique versão da SDK): {e}")
         return None
     except Exception as e:
-        print(f"Erro ao verificar status do pagamento no Mercado Pago: {e}")
+        logger.error(f"Erro ao verificar status do pagamento no Mercado Pago: {e}")
         return None
