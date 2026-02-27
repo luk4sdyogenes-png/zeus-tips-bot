@@ -124,8 +124,7 @@ def create_payment(plan_details: dict, user_id: int):
         "payer": {
             "email": f"user_{user_id}@example.com", # Email fictício para o payer
         },
-        "external_reference": f"zeus_tips_sub_{user_id}_{datetime.now().timestamp()}",
-        "notification_url": "https://your_webhook_url.com/mercadopago_webhook" # Substituir pela URL do webhook real
+        "external_reference": f"zeus_tips_sub_{user_id}_{datetime.now().timestamp()}"
     }
 
     try:
