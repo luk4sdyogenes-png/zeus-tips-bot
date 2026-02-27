@@ -15,11 +15,12 @@ from dotenv import load_dotenv
 from api_integrations import get_fixtures_by_date, get_team_statistics, get_h2h_statistics, analyze_and_predict, create_payment, check_payment_status
 from database import init_db, get_setting, set_setting, add_subscriber, get_subscriber, update_subscriber_status, get_all_active_subscribers, add_prediction_history
 
-# Carregar variáveis de ambiente
-load_dotenv()
+# Carregar variáveis de ambiente (override=False evita sobrescrever variáveis já definidas no Railway)
+load_dotenv(override=False)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID")) if os.getenv("ADMIN_USER_ID") else None
+VIP_CHANNEL_ID_ENV = os.getenv("VIP_CHANNEL_ID")  # Fallback para variável de ambiente
 
 # Configurar logging
 logging.basicConfig(
@@ -35,12 +36,26 @@ init_db()
 # --- Funções Auxiliares ---
 
 async def get_vip_channel_id_from_db():
-    return get_setting("VIP_CHANNEL_ID")
+    """
+    Obtém o VIP_CHANNEL_ID do banco de dados.
+    Se não estiver no banco, usa a variável de ambiente como fallback.
+    Isso garante que o canal VIP não se perca em redeploys no Railway.
+    """
+    vip_channel_id = get_setting("VIP_CHANNEL_ID")
+    
+    # Se não estiver no banco, tenta usar a variável de ambiente
+    if not vip_channel_id and VIP_CHANNEL_ID_ENV:
+        logger.info("VIP_CHANNEL_ID não encontrado no banco. Usando variável de ambiente como fallback.")
+        vip_channel_id = VIP_CHANNEL_ID_ENV
+        # Opcionalmente, salva no banco para futuras consultas
+        set_setting("VIP_CHANNEL_ID", vip_channel_id)
+    
+    return vip_channel_id
 
 async def generate_vip_invite_link(context: ContextTypes.DEFAULT_TYPE):
     vip_channel_id = await get_vip_channel_id_from_db()
     if not vip_channel_id:
-        logger.error("VIP_CHANNEL_ID não configurado no banco de dados.")
+        logger.error("VIP_CHANNEL_ID não configurado no banco de dados nem em variáveis de ambiente.")
         return "#ERRO_CANAL_VIP_NAO_CONFIGURADO"
     
     # Se o VIP_CHANNEL_ID for um link completo, retorna ele mesmo.
@@ -212,7 +227,7 @@ async def predictions_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     subscriber = get_subscriber(user_id)
 
     if subscriber and subscriber[5] == "active": # subscriber[5] é o status
-        await update.message.reply_text("Como assinante VIP, você receberá os palpites diretamente no canal VIP! Verifique o canal para as últimas análises.")
+        await update.message.reply_text("Como assinante VIP, você receberá os palpites completos diretamente no canal VIP. Fique atento às notificações!")
     else:
         today = datetime.now().strftime("%Y-%m-%d")
         fixtures_data = get_fixtures_by_date(today)
@@ -295,7 +310,7 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Iniciando envio diário de palpites...")
     vip_channel_id = await get_vip_channel_id_from_db()
     if not vip_channel_id:
-        logger.warning("VIP_CHANNEL_ID não configurado no banco de dados. Palpites não serão enviados.")
+        logger.warning("VIP_CHANNEL_ID não configurado no banco de dados nem em variáveis de ambiente. Palpites não serão enviados.")
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
