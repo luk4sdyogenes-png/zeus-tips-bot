@@ -58,10 +58,16 @@ async def generate_vip_invite_link(context: ContextTypes.DEFAULT_TYPE):
         logger.error("VIP_CHANNEL_ID não configurado no banco de dados nem em variáveis de ambiente.")
         return "#ERRO_CANAL_VIP_NAO_CONFIGURADO"
     
-    # Se o VIP_CHANNEL_ID for um link completo, retorna ele mesmo.
-    # Se for apenas o hash, constrói o link.
+    # Limpa espaços extras
+    vip_channel_id = vip_channel_id.strip()
+    
+    # Se já for um link completo do Telegram, retorna direto
     if vip_channel_id.startswith("https://t.me/"):
         return vip_channel_id
+    elif vip_channel_id.startswith("t.me/"):
+        return f"https://{vip_channel_id}"
+    elif vip_channel_id.startswith("+"):
+        return f"https://t.me/{vip_channel_id}"
     else:
         return f"https://t.me/+{vip_channel_id}"
 
