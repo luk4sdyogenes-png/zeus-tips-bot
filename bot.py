@@ -158,14 +158,21 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 return
 
             await query.edit_message_text(
-                f"Você escolheu o **{selected_plan['title']}** no valor de **R$ {selected_plan['price']:.2f}**.\n\n"\
-                "Para finalizar a assinatura, realize o pagamento via Pix usando o QR Code acima ou o código copia e cola.\n\n"\
-                "**Código Pix (copia e cola):**\n`{qr_code_text}`\n\n"\
-                "Após o pagamento, aguarde alguns minutos para a confirmação. "\
-                "Você será notificado automaticamente e receberá o link do canal VIP!"
+                f"Você escolheu o {selected_plan['title']} no valor de R$ {selected_plan['price']:.2f}.\n\n"
+                f"Para finalizar a assinatura, realize o pagamento via Pix usando o QR Code acima ou o código copia e cola abaixo."
             )
 
-            await context.bot.send_message(chat_id=user_id, text="Use /status para verificar a confirmação do seu pagamento.")
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"Código Pix (copia e cola):\n\n{qr_code_text}"
+            )
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="Após o pagamento, aguarde alguns minutos para a confirmação. "
+                     "Você será notificado automaticamente e receberá o link do canal VIP!\n\n"
+                     "Use /status para verificar a confirmação do seu pagamento."
+            )
         else:
             await query.edit_message_text("Houve um erro ao gerar o pagamento. Por favor, tente novamente mais tarde.")
     else:
