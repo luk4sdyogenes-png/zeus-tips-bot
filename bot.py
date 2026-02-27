@@ -13,14 +13,15 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from dotenv import load_dotenv
 
 from api_integrations import get_fixtures_by_date, get_team_statistics, get_h2h_statistics, analyze_and_predict, create_payment, check_payment_status
-from database import init_db, get_setting, set_setting, add_subscriber, get_subscriber, update_subscriber_status, get_all_active_subscribers, add_prediction_history
+from database import init_db, get_setting, set_setting, add_subscriber, get_subscriber, update_subscriber_status, get_all_active_subscribers, add_prediction_history, get_all_subscribers
 
-# Carregar variáveis de ambiente (override=False evita sobrescrever variáveis já definidas no Railway)
+# Carregar variáveis de ambiente
 load_dotenv(override=False)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID")) if os.getenv("ADMIN_USER_ID") else None
-VIP_CHANNEL_ID_ENV = os.getenv("VIP_CHANNEL_ID")  # Fallback para variável de ambiente
+# A variável VIP_CHANNEL_ID será lida do banco de dados. A variável de ambiente serve como fallback inicial.
+VIP_CHANNEL_ID_ENV = os.getenv("VIP_CHANNEL_ID")
 
 # Configurar logging
 logging.basicConfig(
@@ -37,39 +38,44 @@ init_db()
 
 async def get_vip_channel_id_from_db():
     """
-    Obtém o VIP_CHANNEL_ID do banco de dados.
-    Se não estiver no banco, usa a variável de ambiente como fallback.
-    Isso garante que o canal VIP não se perca em redeploys no Railway.
+    Obtém o VIP_CHANNEL_ID numérico do banco de dados.
+    É crucial que o ID seja o número inteiro do canal (ex: -1001234567890),
+    não o link ou o hash.
     """
     vip_channel_id = get_setting("VIP_CHANNEL_ID")
-    
-    # Se não estiver no banco, tenta usar a variável de ambiente
     if not vip_channel_id and VIP_CHANNEL_ID_ENV:
         logger.info("VIP_CHANNEL_ID não encontrado no banco. Usando variável de ambiente como fallback.")
         vip_channel_id = VIP_CHANNEL_ID_ENV
-        # Opcionalmente, salva no banco para futuras consultas
         set_setting("VIP_CHANNEL_ID", vip_channel_id)
     
-    return vip_channel_id
+    try:
+        return int(vip_channel_id) if vip_channel_id else None
+    except (ValueError, TypeError):
+        logger.error(f"VIP_CHANNEL_ID configurado ({vip_channel_id}) não é um ID numérico válido.")
+        return None
 
 async def generate_vip_invite_link(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Gera um link de convite de uso único para o canal VIP.
+    O link expira em 24 horas e só pode ser usado por 1 pessoa.
+    """
     vip_channel_id = await get_vip_channel_id_from_db()
     if not vip_channel_id:
-        logger.error("VIP_CHANNEL_ID não configurado no banco de dados nem em variáveis de ambiente.")
+        logger.error("PROTEÇÃO 1: Falha ao gerar link. VIP_CHANNEL_ID numérico não configurado.")
         return "#ERRO_CANAL_VIP_NAO_CONFIGURADO"
-    
-    # Limpa espaços extras
-    vip_channel_id = vip_channel_id.strip()
-    
-    # Se já for um link completo do Telegram, retorna direto
-    if vip_channel_id.startswith("https://t.me/"):
-        return vip_channel_id
-    elif vip_channel_id.startswith("t.me/"):
-        return f"https://{vip_channel_id}"
-    elif vip_channel_id.startswith("+"):
-        return f"https://t.me/{vip_channel_id}"
-    else:
-        return f"https://t.me/+{vip_channel_id}"
+
+    try:
+        expire_date = datetime.now() + timedelta(hours=24)
+        invite_link = await context.bot.create_chat_invite_link(
+            chat_id=vip_channel_id,
+            expire_date=expire_date,
+            member_limit=1
+        )
+        logger.info(f"PROTEÇÃO 1: Link de convite único gerado para o canal {vip_channel_id}.")
+        return invite_link.invite_link
+    except Exception as e:
+        logger.error(f"PROTEÇÃO 1: Erro ao criar link de convite para o canal {vip_channel_id}: {e}")
+        return "#ERRO_GERAR_LINK_CONVITE"
 
 async def check_subscriptions_expiration(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Verificando expiração de assinaturas...")
@@ -119,7 +125,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/admin_jogos [data YYYY-MM-DD] - Indicar jogos específicos para análise\n"\
         "/admin_forcar_envio - Forçar o envio de palpites agora\n"\
         "/admin_estatisticas - Ver estatísticas do bot\n"\
-        "/admin_setchannel [link_do_canal_VIP] - Configurar o link do canal VIP"
+        "/admin_setchannel [ID_numerico_do_canal] - Configurar o ID do canal VIP"
     )
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -140,7 +146,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     plans = {
         "plan_mensal": {"title": "Plano Mensal", "price": 29.90, "duration_days": 30},
         "plan_trimestral": {"title": "Plano Trimestral", "price": 69.90, "duration_days": 90},
-        "plan_vitalicio": {"title": "Plano Vitalício", "price": 197.00, "duration_days": 36500}, # Aproximadamente 100 anos
+        "plan_vitalicio": {"title": "Plano Vitalício", "price": 197.00, "duration_days": 36500},
     }
 
     selected_plan = plans.get(query.data)
@@ -202,7 +208,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                   f"Status: {status.capitalize()}\n\n"
         if status == "active":
             vip_invite_link = await generate_vip_invite_link(context)
-            message += f"Você tem acesso total aos palpites VIP! Acesse: {vip_invite_link}"
+            message += f"Você tem acesso total aos palpites VIP! Use este link de uso único para entrar: {vip_invite_link}"
         else:
             message += "Sua assinatura não está ativa. Use /assinar para renovar ou adquirir um plano."
     else:
@@ -219,7 +225,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await update.message.reply_text(
                         f"🎉 Parabéns! Seu pagamento foi **APROVADO**!\n\n"\
                         f"Sua assinatura **{selected_plan['title']}** está ativa.\n"\
-                        f"Acesse o canal VIP agora: {vip_invite_link}\n\n"\
+                        f"Acesse o canal VIP com seu link exclusivo (válido por 24h): {vip_invite_link}\n\n"\
                         "Bem-vindo ao time Zeus Tips! ⚡"
                     )
                     message = "Sua assinatura foi ativada!"
@@ -240,7 +246,7 @@ async def predictions_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     subscriber = get_subscriber(user_id)
 
-    if subscriber and subscriber[5] == "active": # subscriber[5] é o status
+    if subscriber and subscriber[5] == "active":
         await update.message.reply_text("Como assinante VIP, você receberá os palpites completos diretamente no canal VIP. Fique atento às notificações!")
     else:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -265,7 +271,7 @@ async def predictions_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             home_team_name = fixture["teams"]["home"]["name"]
             away_team_name = fixture["teams"]["away"]["name"]
             match_time_utc = datetime.fromisoformat(fixture["fixture"]["date"].replace("Z", "+00:00"))
-            match_time_brt = match_time_utc - timedelta(hours=3) # Ajustar para BRT (GMT-3)
+            match_time_brt = match_time_utc - timedelta(hours=3)
 
             home_team_id = fixture["teams"]["home"]["id"]
             away_team_id = fixture["teams"]["away"]["id"]
@@ -324,7 +330,7 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Iniciando envio diário de palpites...")
     vip_channel_id = await get_vip_channel_id_from_db()
     if not vip_channel_id:
-        logger.warning("VIP_CHANNEL_ID não configurado no banco de dados nem em variáveis de ambiente. Palpites não serão enviados.")
+        logger.warning("VIP_CHANNEL_ID não configurado. Palpites não serão enviados.")
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
@@ -350,7 +356,7 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
         home_team_name = fixture["teams"]["home"]["name"]
         away_team_name = fixture["teams"]["away"]["name"]
         match_time_utc = datetime.fromisoformat(fixture["fixture"]["date"].replace("Z", "+00:00"))
-        match_time_brt = match_time_utc - timedelta(hours=3) # Ajustar para BRT (GMT-3)
+        match_time_brt = match_time_utc - timedelta(hours=3)
 
         home_team_id = fixture["teams"]["home"]["id"]
         away_team_id = fixture["teams"]["away"]["id"]
@@ -406,7 +412,7 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "prediction": prediction,
                 "confidence": confidence,
                 "suggested_odd": suggested_odd,
-                "market": market # Adicionar mercado para exibição
+                "market": market
             })
 
     all_predictions.sort(key=lambda x: x["confidence"], reverse=True)
@@ -463,7 +469,6 @@ async def admin_games_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Formato de data inválido. Use YYYY-MM-DD.")
         return
 
-    await update.message.reply_text(f"Buscando jogos para a data: {date_str}...")
     fixtures = get_fixtures_by_date(date_str)
 
     if fixtures:
@@ -507,33 +512,76 @@ async def admin_setchannel_command(update: Update, context: ContextTypes.DEFAULT
         return
 
     if not context.args or len(context.args) != 1:
-        await update.message.reply_text("Uso: /admin_setchannel [link_do_canal_VIP ou ID do canal]")
+        await update.message.reply_text(
+            "Uso: /admin_setchannel [ID_numérico_do_canal]\n\n"\
+            "**Como obter o ID numérico:**\n"\
+            "1. Adicione o bot @userinfobot ao seu canal como administrador.\n"\
+            "2. Envie qualquer mensagem no canal.\n"\
+            "3. O bot responderá com as informações do canal, incluindo o ID (geralmente começa com -100...)"
+        )
         return
 
     channel_input = context.args[0]
-    # Tenta extrair o hash do link de convite ou usa o input diretamente como ID
-    match = re.search(r"t.me/\+([a-zA-Z0-9_-]+)", channel_input)
-    if match:
-        vip_channel_id = match.group(1)
-    elif channel_input.startswith("-100") and channel_input[1:].isdigit(): # Verifica se é um ID numérico de canal
-        vip_channel_id = channel_input
-    else:
-        await update.message.reply_text("Formato de link ou ID de canal inválido. Use um link de convite (ex: t.me/+hash) ou o ID numérico do canal (ex: -1001234567890).")
+    try:
+        # Valida se é um ID numérico de canal/supergrupo
+        if channel_input.startswith('-100') and channel_input[1:].isdigit():
+            vip_channel_id = int(channel_input)
+            set_setting("VIP_CHANNEL_ID", str(vip_channel_id))
+            await update.message.reply_text(f"Canal VIP configurado com sucesso para o ID: `{vip_channel_id}`")
+        else:
+            raise ValueError("ID de canal inválido")
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            "Formato de ID de canal inválido. O ID deve ser um número inteiro, geralmente começando com -100. "\
+            "Siga as instruções em /admin_setchannel para obter o ID correto."
+        )
+
+async def check_vip_members(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("PROTEÇÃO 2: Iniciando verificação periódica de membros no canal VIP...")
+    vip_channel_id = await get_vip_channel_id_from_db()
+    if not vip_channel_id:
+        logger.error("PROTEÇÃO 2: Verificação de membros abortada. VIP_CHANNEL_ID numérico não configurado.")
         return
 
-    set_setting("VIP_CHANNEL_ID", vip_channel_id)
-    await update.message.reply_text(f"Canal VIP configurado com sucesso para: `{vip_channel_id}`")
+    all_subscribers = get_all_subscribers()
+    active_subscriber_ids = {sub[0] for sub in all_subscribers if sub[1] == 'active'}
+
+    for user_id, db_status in all_subscribers:
+        # Nunca remover o admin do bot
+        if user_id == ADMIN_USER_ID:
+            continue
+
+        try:
+            chat_member = await context.bot.get_chat_member(chat_id=vip_channel_id, user_id=user_id)
+            is_in_channel = chat_member.status in ["member", "administrator", "creator"]
+
+            # Cenário: Usuário está no canal, mas não tem assinatura ativa no DB
+            if is_in_channel and user_id not in active_subscriber_ids:
+                logger.info(f"PROTEÇÃO 2: Removendo usuário {user_id} do canal VIP. Status no DB: '{db_status}', Status no Canal: '{chat_member.status}'.")
+                await context.bot.ban_chat_member(chat_id=vip_channel_id, user_id=user_id)
+                await context.bot.unban_chat_member(chat_id=vip_channel_id, user_id=user_id)
+                logger.info(f"PROTEÇÃO 2: Usuário {user_id} banido e desbanido para permitir reentrada futura.")
+
+        except Exception as e:
+            # Ignora erros de "user not found", que são comuns para usuários que saíram
+            if "user not found" in str(e).lower():
+                logger.debug(f"PROTEÇÃO 2: Usuário {user_id} não encontrado no canal VIP (provavelmente já saiu).")
+            else:
+                logger.error(f"PROTEÇÃO 2: Erro ao verificar/remover membro {user_id} do canal {vip_channel_id}: {e}")
+        
+        await asyncio.sleep(1)
+
+    logger.info("PROTEÇÃO 2: Verificação de membros do canal VIP concluída.")
 
 # --- Agendamento de Tarefas com Job Queue ---
 
 async def setup_jobs(application: Application) -> None:
-    """Configura os jobs de agendamento usando o job_queue nativo do python-telegram-bot v20+"""
     job_queue = application.job_queue
     
     # Agendar envio diário de palpites para 12:00 BRT (15:00 UTC)
     job_queue.run_daily(
         send_daily_predictions,
-        time=time(hour=15, minute=0),  # 15:00 UTC = 12:00 BRT (GMT-3)
+        time=time(hour=15, minute=0),
         name="send_daily_predictions"
     )
     logger.info("Agendamento diário de palpites configurado para 12:00 BRT (15:00 UTC).")
@@ -541,14 +589,22 @@ async def setup_jobs(application: Application) -> None:
     # Agendar verificação de expiração de assinaturas a cada 6 horas
     job_queue.run_repeating(
         check_subscriptions_expiration,
-        interval=6 * 3600,  # 6 horas em segundos
+        interval=6 * 3600,
         first=0,
         name="check_subscriptions_expiration"
     )
     logger.info("Agendamento de verificação de expiração de assinaturas configurado a cada 6 horas.")
 
+    # Agendar verificação de membros do canal VIP a cada 6 horas
+    job_queue.run_repeating(
+        check_vip_members,
+        interval=6 * 3600,
+        first=60,
+        name="check_vip_members"
+    )
+    logger.info("PROTEÇÃO 2: Agendamento de verificação de membros do canal VIP configurado a cada 6 horas.")
+
 async def post_init(application: Application) -> None:
-    """Callback executado após a inicialização da aplicação"""
     await setup_jobs(application)
 
 # --- Main --- 
