@@ -164,7 +164,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"Código Pix (copia e cola):\n\n{qr_code_text}"
+                text=f"📋 *Código Pix (toque para copiar):*\n\n`{qr_code_text}`",
+                parse_mode='Markdown'
             )
 
             await context.bot.send_message(
