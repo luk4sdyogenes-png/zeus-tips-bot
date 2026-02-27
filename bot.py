@@ -1,15 +1,11 @@
-
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import sqlite3
 import json
-import schedule
-import time
 import io
 import base64
 import asyncio
-import threading
 import re
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,7 +14,6 @@ from dotenv import load_dotenv
 
 from api_integrations import get_fixtures_by_date, get_team_statistics, get_h2h_statistics, analyze_and_predict, create_payment, check_payment_status
 from database import init_db, get_setting, set_setting, add_subscriber, get_subscriber, update_subscriber_status, get_all_active_subscribers, add_prediction_history
-from scheduler import run_continuously # Importar o run_continuously do scheduler
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -108,9 +103,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
-        [InlineKeyboardButton("Plano Mensal (R$ 29,90)", callback_data=\'plan_mensal\')],
-        [InlineKeyboardButton("Plano Trimestral (R$ 69,90)", callback_data=\'plan_trimestral\')],
-        [InlineKeyboardButton("Plano Vitalício (R$ 197,00)", callback_data=\'plan_vitalicio\')],
+        [InlineKeyboardButton("Plano Mensal (R$ 29,90)", callback_data='plan_mensal')],
+        [InlineKeyboardButton("Plano Trimestral (R$ 69,90)", callback_data='plan_trimestral')],
+        [InlineKeyboardButton("Plano Vitalício (R$ 197,00)", callback_data='plan_vitalicio')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Escolha seu plano de assinatura VIP:", reply_markup=reply_markup)
@@ -148,7 +143,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 return
 
             await query.edit_message_text(
-                f"Você escolheu o **{selected_plan["title"]}** no valor de **R$ {selected_plan["price"]:.2f}**.\n\n"\
+                f"Você escolheu o **{selected_plan['title']}** no valor de **R$ {selected_plan['price']:.2f}**.\n\n"\
                 "Para finalizar a assinatura, realize o pagamento via Pix usando o QR Code acima ou o código copia e cola.\n\n"\
                 "**Código Pix (copia e cola):**\n`{qr_code_text}`\n\n"\
                 "Após o pagamento, aguarde alguns minutos para a confirmação. "\
@@ -194,7 +189,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     vip_invite_link = await generate_vip_invite_link(context)
                     await update.message.reply_text(
                         f"🎉 Parabéns! Seu pagamento foi **APROVADO**!\n\n"\
-                        f"Sua assinatura **{selected_plan["title"]}** está ativa.\n"\
+                        f"Sua assinatura **{selected_plan['title']}** está ativa.\n"\
                         f"Acesse o canal VIP agora: {vip_invite_link}\n\n"\
                         "Bem-vindo ao time Zeus Tips! ⚡"
                     )
@@ -283,7 +278,7 @@ async def predictions_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     preview_prediction_text = f"⚡ ZEUS TIPS - PRÉVIA ⚡\n"
                     preview_prediction_text += f"🏆 Campeonato: {championship}\n"
                     preview_prediction_text += f"⚽ Jogo: {home_team_name} vs {away_team_name}\n"
-                    preview_prediction_text += f"⏰ Horário: {match_time_brt.strftime("%H:%M BRT")}\n"
+                    preview_prediction_text += f"⏰ Horário: {match_time_brt.strftime('%H:%M BRT')}\n"
                     preview_prediction_text += f"📊 Análise: {analysis}\n"
                     preview_prediction_text += f"🎯 Palpite: {prediction} ({market})\n"
                     preview_prediction_text += f"📈 Confiança: {confidence * 100:.0f}%\n"
@@ -392,13 +387,13 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
             break
 
         message_text = f"⚡ ZEUS TIPS - PALPITE DO DIA ⚡\n"
-        message_text += f"🏆 Campeonato: {pred["championship"]}\n"
-        message_text += f"⚽ Jogo: {pred["team_a"]} vs {pred["team_b"]}\n"
-        message_text += f"⏰ Horário: {pred["match_time"]}\n"
-        message_text += f"📊 Análise: {pred["analysis"]}\n"
-        message_text += f"🎯 Palpite: {pred["prediction"]} ({pred["market"]})\n"
-        message_text += f"📈 Confiança: {pred["confidence"] * 100:.0f}%\n"
-        message_text += f"💰 Odd sugerida: {pred["suggested_odd"]:.2f}\n"
+        message_text += f"🏆 Campeonato: {pred['championship']}\n"
+        message_text += f"⚽ Jogo: {pred['team_a']} vs {pred['team_b']}\n"
+        message_text += f"⏰ Horário: {pred['match_time']}\n"
+        message_text += f"📊 Análise: {pred['analysis']}\n"
+        message_text += f"🎯 Palpite: {pred['prediction']} ({pred['market']})\n"
+        message_text += f"📈 Confiança: {pred['confidence'] * 100:.0f}%\n"
+        message_text += f"💰 Odd sugerida: {pred['suggested_odd']:.2f}\n"
 
         try:
             await context.bot.send_message(chat_id=vip_channel_id, text=message_text)
@@ -408,7 +403,7 @@ async def send_daily_predictions(context: ContextTypes.DEFAULT_TYPE) -> None:
                 pred["suggested_odd"]
             )
             sent_count += 1
-            logger.info(f"Palpite enviado para {pred["team_a"]} vs {pred["team_b"]}")
+            logger.info(f"Palpite enviado para {pred['team_a']} vs {pred['team_b']}")
         except Exception as e:
             logger.error(f"Erro ao enviar palpite para o canal VIP: {e}")
 
@@ -450,7 +445,7 @@ async def admin_games_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             championship = fixture["league"]["name"]
             match_time_utc = datetime.fromisoformat(fixture["fixture"]["date"].replace("Z", "+00:00"))
             match_time_brt = match_time_utc - timedelta(hours=3)
-            message += f"🏆 {championship}\n⚽ {home_team} vs {away_team}\n⏰ {match_time_brt.strftime("%H:%M BRT")}\n\n"
+            message += f"🏆 {championship}\n⚽ {home_team} vs {away_team}\n⏰ {match_time_brt.strftime('%H:%M BRT')}\n\n"
         await update.message.reply_text(message)
     else:
         await update.message.reply_text(f"Nenhum jogo encontrado para {date_str}.")
@@ -463,7 +458,7 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn = sqlite3.connect("zeus_tips.db")
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM subscribers WHERE status = \'active\'")
+    cursor.execute("SELECT COUNT(*) FROM subscribers WHERE status = 'active'")
     active_subscribers = cursor.fetchone()[0]
 
     cursor.execute("SELECT COUNT(*) FROM predictions_history")
@@ -500,21 +495,37 @@ async def admin_setchannel_command(update: Update, context: ContextTypes.DEFAULT
     set_setting("VIP_CHANNEL_ID", vip_channel_id)
     await update.message.reply_text(f"Canal VIP configurado com sucesso para: `{vip_channel_id}`")
 
-# --- Agendamento de Tarefas ---
+# --- Agendamento de Tarefas com Job Queue ---
 
-async def setup_daily_schedules(application: Application):
-    schedule.every().day.at("15:00").do(lambda: application.create_task(send_daily_predictions(application)))
-    logger.info("Agendamento diário de palpites configurado para 12:00 BRT.")
+async def setup_jobs(application: Application) -> None:
+    """Configura os jobs de agendamento usando o job_queue nativo do python-telegram-bot v20+"""
+    job_queue = application.job_queue
+    
+    # Agendar envio diário de palpites para 12:00 BRT (15:00 UTC)
+    job_queue.run_daily(
+        send_daily_predictions,
+        time=time(hour=15, minute=0),  # 15:00 UTC = 12:00 BRT (GMT-3)
+        name="send_daily_predictions"
+    )
+    logger.info("Agendamento diário de palpites configurado para 12:00 BRT (15:00 UTC).")
 
-    schedule.every(6).hours.do(lambda: application.create_task(check_subscriptions_expiration(application)))
+    # Agendar verificação de expiração de assinaturas a cada 6 horas
+    job_queue.run_repeating(
+        check_subscriptions_expiration,
+        interval=6 * 3600,  # 6 horas em segundos
+        first=0,
+        name="check_subscriptions_expiration"
+    )
     logger.info("Agendamento de verificação de expiração de assinaturas configurado a cada 6 horas.")
 
-    stop_run_continuously = run_continuously()
+async def post_init(application: Application) -> None:
+    """Callback executado após a inicialização da aplicação"""
+    await setup_jobs(application)
 
 # --- Main --- 
 
 def main() -> None:
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
     # Comandos de usuário
     application.add_handler(CommandHandler("start", start_command))
@@ -531,9 +542,6 @@ def main() -> None:
     application.add_handler(CommandHandler("admin_jogos", admin_games_command))
     application.add_handler(CommandHandler("admin_estatisticas", admin_stats_command))
     application.add_handler(CommandHandler("admin_setchannel", admin_setchannel_command))
-
-    # Configurar agendamentos
-    application.create_task(setup_daily_schedules(application))
 
     # Iniciar o bot
     application.run_polling(allowed_updates=Update.ALL_TYPES)
