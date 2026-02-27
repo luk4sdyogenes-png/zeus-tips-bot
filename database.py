@@ -110,6 +110,17 @@ def get_all_active_subscribers():
     return results
 
 
+def get_all_subscribers():
+    conn = sqlite3.connect("zeus_tips.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT user_id, status FROM subscribers"
+    )
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
 def add_prediction_history(match_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd):
     conn = sqlite3.connect("zeus_tips.db")
     cursor = conn.cursor()
