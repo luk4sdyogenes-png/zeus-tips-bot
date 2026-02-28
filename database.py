@@ -18,11 +18,11 @@ def init_db():
         )
     """)
 
-    # Tabela para histórico de palpites
+    # Tabela para histórico de palpites (atualizada com fixture_id e result)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS predictions_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            match_id INTEGER,
+            fixture_id INTEGER,
             championship TEXT,
             team_a TEXT,
             team_b TEXT,
@@ -31,7 +31,8 @@ def init_db():
             prediction TEXT,
             confidence REAL,
             suggested_odd REAL,
-            sent_date TEXT
+            result TEXT DEFAULT 'pending',
+            date_added TEXT
         )
     """)
 
@@ -43,8 +44,39 @@ def init_db():
         )
     """)
 
+    # --- Migração: adicionar colunas que podem não existir em bancos antigos ---
+    _migrate_predictions_history(cursor)
+
     conn.commit()
     conn.close()
+
+
+def _migrate_predictions_history(cursor):
+    """
+    Verifica se as colunas novas existem na tabela predictions_history.
+    Se não existirem, adiciona-as para manter compatibilidade com bancos antigos.
+    """
+    cursor.execute("PRAGMA table_info(predictions_history)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    # Renomear match_id -> fixture_id se necessário (match_id era o nome antigo)
+    if "fixture_id" not in existing_columns and "match_id" in existing_columns:
+        cursor.execute("ALTER TABLE predictions_history RENAME COLUMN match_id TO fixture_id")
+
+    # Adicionar coluna fixture_id se não existir de nenhuma forma
+    if "fixture_id" not in existing_columns and "match_id" not in existing_columns:
+        cursor.execute("ALTER TABLE predictions_history ADD COLUMN fixture_id INTEGER")
+
+    # Adicionar coluna result se não existir
+    if "result" not in existing_columns:
+        cursor.execute("ALTER TABLE predictions_history ADD COLUMN result TEXT DEFAULT 'pending'")
+
+    # Adicionar coluna date_added se não existir (substitui sent_date)
+    if "date_added" not in existing_columns:
+        if "sent_date" in existing_columns:
+            cursor.execute("ALTER TABLE predictions_history RENAME COLUMN sent_date TO date_added")
+        else:
+            cursor.execute("ALTER TABLE predictions_history ADD COLUMN date_added TEXT")
 
 
 def get_setting(key):
@@ -121,16 +153,60 @@ def get_all_subscribers():
     return results
 
 
-def add_prediction_history(match_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd):
+def add_prediction_history(fixture_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd):
+    """Adiciona um palpite ao histórico com status 'pending'."""
     conn = sqlite3.connect("zeus_tips.db")
     cursor = conn.cursor()
-    sent_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_added = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute(
-        "INSERT INTO predictions_history (match_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd, sent_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (match_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd, sent_date)
+        "INSERT INTO predictions_history (fixture_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd, result, date_added) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (fixture_id, championship, team_a, team_b, match_time, analysis, prediction, confidence, suggested_odd, "pending", date_added)
     )
     conn.commit()
     conn.close()
+
+
+def get_pending_predictions():
+    """Retorna todos os palpites com resultado pendente."""
+    conn = sqlite3.connect("zeus_tips.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, fixture_id, championship, team_a, team_b, match_time, prediction, confidence, suggested_odd, date_added "
+        "FROM predictions_history WHERE result = 'pending'"
+    )
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+
+def update_prediction_result(prediction_id, result):
+    """Atualiza o resultado de um palpite (green, red)."""
+    conn = sqlite3.connect("zeus_tips.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE predictions_history SET result = ? WHERE id = ?",
+        (result, prediction_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_daily_predictions_summary(date_str):
+    """
+    Retorna o resumo dos palpites de um dia específico.
+    date_str no formato 'YYYY-MM-DD'.
+    Retorna lista de tuplas: (id, fixture_id, prediction, confidence, suggested_odd, result)
+    """
+    conn = sqlite3.connect("zeus_tips.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, fixture_id, prediction, confidence, suggested_odd, result "
+        "FROM predictions_history WHERE date_added LIKE ?",
+        (f"{date_str}%",)
+    )
+    results = cursor.fetchall()
+    conn.close()
+    return results
 
 
 if __name__ == "__main__":
