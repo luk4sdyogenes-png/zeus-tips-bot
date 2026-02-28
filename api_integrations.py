@@ -31,6 +31,18 @@ def get_fixtures_by_date(date: str): # date format YYYY-MM-DD
     response.raise_for_status()
     return response.json()["response"]
 
+def get_live_fixtures():
+    """Busca jogos que estão acontecendo ao vivo agora."""
+    url = "https://v3.football.api-sports.io/fixtures?live=all"
+    headers = get_api_football_headers()
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()["response"]
+    except Exception as e:
+        logger.error(f"Erro ao buscar jogos ao vivo: {e}")
+        return []
+
 def get_team_statistics(team_id: int, league_id: int, season: int):
     url = f"https://v3.football.api-sports.io/teams/statistics?league={league_id}&team={team_id}&season={season}"
     headers = get_api_football_headers()
@@ -44,6 +56,50 @@ def get_h2h_statistics(team_a_id: int, team_b_id: int):
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return response.json()["response"]
+
+def get_fixture_result(fixture_id: int):
+    """
+    Busca o resultado final de um jogo específico pela API-Football.
+    Retorna um dicionário com informações do jogo ou None em caso de erro.
+    
+    Campos retornados:
+    - status_short: código do status (FT, NS, 1H, 2H, HT, etc.)
+    - status_long: descrição do status
+    - home_team: nome do time da casa
+    - away_team: nome do time visitante
+    - home_goals: gols do time da casa
+    - away_goals: gols do time visitante
+    - score: dicionário completo de placar (halftime, fulltime, extratime, penalty)
+    - fixture_data: dados brutos completos da fixture
+    """
+    url = f"https://v3.football.api-sports.io/fixtures?id={fixture_id}"
+    headers = get_api_football_headers()
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()["response"]
+        
+        if not data:
+            logger.warning(f"Nenhum dado encontrado para fixture_id={fixture_id}")
+            return None
+        
+        fixture = data[0]
+        result = {
+            "status_short": fixture["fixture"]["status"]["short"],
+            "status_long": fixture["fixture"]["status"]["long"],
+            "home_team": fixture["teams"]["home"]["name"],
+            "away_team": fixture["teams"]["away"]["name"],
+            "home_goals": fixture["goals"]["home"],
+            "away_goals": fixture["goals"]["away"],
+            "score": fixture["score"],
+            "fixture_data": fixture
+        }
+        
+        logger.info(f"Resultado obtido para fixture {fixture_id}: {result['home_team']} {result['home_goals']} x {result['away_goals']} {result['away_team']} (Status: {result['status_short']})")
+        return result
+    except Exception as e:
+        logger.error(f"Erro ao buscar resultado da fixture {fixture_id}: {e}")
+        return None
 
 # --- OpenAI Integration ---
 
