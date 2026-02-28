@@ -419,6 +419,10 @@ async def get_vip_channel_id_from_db():
         vip_channel_id = VIP_CHANNEL_ID_ENV
         set_setting("VIP_CHANNEL_ID", vip_channel_id)
     
+    if vip_channel_id:
+        # Limpar caracteres inválidos (=, espaços, etc.)
+        vip_channel_id = str(vip_channel_id).strip().lstrip('=')
+    
     try:
         return int(vip_channel_id) if vip_channel_id else None
     except (ValueError, TypeError):
